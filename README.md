@@ -26,7 +26,7 @@ To update Playwright, change the default `PLAYWRIGHT_VERSION` argument, set a ne
 
 ## Consumer contract
 
-Consumers install their own application dependencies and matching Playwright 1.62.0 client binding in their own dependency environment, set `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`, and create their own runtime user. The Node consumer uses the Node 24 runtime; the Python consumer creates a Python 3.11 venv and supplies `DISPLAY` through its own Xvfb setup when headed Chromium is required. Consumers must pin the published image by digest, for example:
+Consumers install their own application dependencies and matching Playwright 1.62.0 client binding in their own dependency environment, set `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`, and create their own runtime user. The image exposes `PLAYWRIGHT_RUNTIME_VERSION` and `PLAYWRIGHT_RUNTIME_PLAYWRIGHT_VERSION` so consumer builds can fail immediately when their client binding does not match the browser payload. The Node consumer uses the Node 24 runtime; the Python consumer creates a Python 3.11 venv and supplies `DISPLAY` through its own Xvfb setup when headed Chromium is required. Consumers must pin the published image by digest, for example:
 
 ```dockerfile
 FROM ghcr.io/j2h4u/playwright-chromium-runtime@sha256:<published-digest>
