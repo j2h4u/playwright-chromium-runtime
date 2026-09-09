@@ -10,21 +10,8 @@ ARG SOURCE_COMMIT=local
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
-    PLAYWRIGHT_RUNTIME_VERSION=${RUNTIME_VERSION} \
-    PLAYWRIGHT_RUNTIME_PLAYWRIGHT_VERSION=${PLAYWRIGHT_VERSION} \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
-
-LABEL org.opencontainers.image.title="Playwright Chromium Runtime" \
-      org.opencontainers.image.description="Shared Node 24 and Python 3.11 runtime with Playwright Chromium browser artifacts" \
-      org.opencontainers.image.source="https://github.com/j2h4u/playwright-chromium-runtime" \
-      org.opencontainers.image.url="https://github.com/j2h4u/playwright-chromium-runtime" \
-      org.opencontainers.image.licenses="MIT" \
-      org.opencontainers.image.version="${RUNTIME_VERSION}" \
-      org.opencontainers.image.revision="${SOURCE_COMMIT}" \
-      com.j2h4u.runtime.name="playwright-chromium-runtime" \
-      com.j2h4u.runtime.version="${RUNTIME_VERSION}" \
-      com.j2h4u.playwright.version="${PLAYWRIGHT_VERSION}"
 
 RUN set -eux; \
     test "$(dpkg --print-architecture)" = amd64; \
@@ -54,6 +41,22 @@ RUN set -eux; \
     chmod -R a+rX "${PLAYWRIGHT_BROWSERS_PATH}"; \
     rm -rf "${temp_dir}" /tmp/playwright-browser-dirs /root/.npm /root/.cache; \
     rm -rf /var/cache/apt/* /var/lib/apt/lists/*
+
+# Release metadata stays below the expensive browser layer so a new source
+# commit or runtime revision does not invalidate the browser cache.
+ENV PLAYWRIGHT_RUNTIME_VERSION=${RUNTIME_VERSION} \
+    PLAYWRIGHT_RUNTIME_PLAYWRIGHT_VERSION=${PLAYWRIGHT_VERSION}
+
+LABEL org.opencontainers.image.title="Playwright Chromium Runtime" \
+      org.opencontainers.image.description="Shared Node 24 and Python 3.11 runtime with Playwright Chromium browser artifacts" \
+      org.opencontainers.image.source="https://github.com/j2h4u/playwright-chromium-runtime" \
+      org.opencontainers.image.url="https://github.com/j2h4u/playwright-chromium-runtime" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="${RUNTIME_VERSION}" \
+      org.opencontainers.image.revision="${SOURCE_COMMIT}" \
+      com.j2h4u.runtime.name="playwright-chromium-runtime" \
+      com.j2h4u.runtime.version="${RUNTIME_VERSION}" \
+      com.j2h4u.playwright.version="${PLAYWRIGHT_VERSION}"
 
 # The smoke stage is intentionally excluded from the default image. It adds
 # client bindings only to validate this runtime during a disposable build.
