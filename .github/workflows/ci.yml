@@ -1,0 +1,166 @@
+name: Build and publish runtime
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    tags: ['v*.*.*-r*']
+  workflow_dispatch:
+    inputs:
+      runtime_version:
+        description: Immutable runtime release, for example 1.62.0-r1
+        required: true
+        default: '1.62.0-r1'
+        type: string
+      playwright_version:
+        description: Playwright version to build and publish
+        required: true
+        default: '1.62.0'
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE_NAME: ghcr.io/j2h4u/playwright-chromium-runtime
+
+jobs:
+  build-and-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    outputs:
+      playwright_version: ${{ steps.version.outputs.value }}
+      runtime_version: ${{ steps.version.outputs.runtime }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Resolve and validate Playwright version
+        id: version
+        shell: bash
+        env:
+          DISPATCH_RUNTIME: ${{ inputs.runtime_version }}
+          DISPATCH_VERSION: ${{ inputs.playwright_version }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            runtime="${GITHUB_REF_NAME#v}"
+            version="${runtime%-r*}"
+          elif [[ -n "${DISPATCH_RUNTIME}" ]]; then
+            runtime="${DISPATCH_RUNTIME#v}"
+            version="${DISPATCH_VERSION#v}"
+          else
+            runtime="1.62.0-r1"
+            version="1.62.0"
+          fi
+          [[ "${runtime}" =~ ^[0-9]+\.[0-9]+\.[0-9]+-r[0-9]+$ ]]
+          [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "${runtime}" == "${version}-r"* ]]
+          echo "value=${version}" >> "${GITHUB_OUTPUT}"
+          echo "runtime=${runtime}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build amd64 runtime image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          build-args: |
+            PLAYWRIGHT_VERSION=${{ steps.version.outputs.value }}
+            RUNTIME_VERSION=${{ steps.version.outputs.runtime }}
+            SOURCE_COMMIT=${{ github.sha }}
+          tags: playwright-chromium-runtime:ci
+          load: true
+          cache-from: type=gha,scope=playwright-chromium-runtime
+          cache-to: type=gha,mode=max,scope=playwright-chromium-runtime
+
+      - name: Install temporary Node binding and run headless smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --user 65532:65532 \
+            --env HOME=/tmp/runtime-home \
+            --env PLAYWRIGHT_VERSION=${{ steps.version.outputs.value }} \
+            --env PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+            --volume "${GITHUB_WORKSPACE}/smoke:/opt/runtime-smoke:ro" \
+            playwright-chromium-runtime:ci \
+            sh -euxc '
+              mkdir -p "$HOME"
+              node_dir=$(mktemp -d)
+              cd "$node_dir"
+              npm init --yes >/dev/null
+              npm install --no-save --ignore-scripts --no-audit --fund=false "playwright@${PLAYWRIGHT_VERSION}"
+              NODE_PATH="$node_dir/node_modules" node /opt/runtime-smoke/node-smoke.cjs
+            '
+
+      - name: Install temporary Python binding and run headed smoke in Xvfb
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --user 65532:65532 \
+            --env HOME=/tmp/runtime-home \
+            --env PLAYWRIGHT_VERSION=${{ steps.version.outputs.value }} \
+            --env PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+            --volume "${GITHUB_WORKSPACE}/smoke:/opt/runtime-smoke:ro" \
+            playwright-chromium-runtime:ci \
+            sh -euxc '
+              mkdir -p "$HOME"
+              python_dir=$(mktemp -d)
+              python3 -m venv "$python_dir"
+              "$python_dir/bin/pip" install --no-cache-dir "playwright==${PLAYWRIGHT_VERSION}"
+              xvfb-run -a -s "-screen 0 1280x720x24" "$python_dir/bin/python" /opt/runtime-smoke/python-smoke.py
+            '
+
+  publish:
+    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || github.event_name == 'workflow_dispatch'
+    needs: build-and-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker image metadata
+        id: metadata
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=v${{ needs.build-and-smoke.outputs.runtime_version }}
+            type=raw,value=latest
+
+      - name: Build and publish amd64 image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          build-args: |
+            PLAYWRIGHT_VERSION=${{ needs.build-and-smoke.outputs.playwright_version }}
+            RUNTIME_VERSION=${{ needs.build-and-smoke.outputs.runtime_version }}
+            SOURCE_COMMIT=${{ github.sha }}
+          push: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          cache-from: type=gha,scope=playwright-chromium-runtime
+          cache-to: type=gha,mode=max,scope=playwright-chromium-runtime

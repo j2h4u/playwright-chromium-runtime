@@ -1,0 +1,8 @@
+.git
+.github
+README.md
+LICENSE
+*.swp
+*.tmp
+__pycache__
+*.pyc
