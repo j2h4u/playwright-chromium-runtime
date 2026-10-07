@@ -4,8 +4,8 @@
 # on 2026-09-09. The build command and release workflow select linux/amd64.
 FROM node:24-bookworm-slim@sha256:6642ef280aebc09c4541bee0b15c9f89f0f3f3c247ddee79ae1d37eddfdcbbaa AS runtime
 
-ARG PLAYWRIGHT_VERSION=1.62.0
-ARG RUNTIME_VERSION=1.62.0-r1
+ARG PLAYWRIGHT_VERSION=1.63.0
+ARG RUNTIME_VERSION=1.63.0-r1
 ARG SOURCE_COMMIT=local
 
 ENV DEBIAN_FRONTEND=noninteractive \
