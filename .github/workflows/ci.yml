@@ -9,14 +9,14 @@ on:
   workflow_dispatch:
     inputs:
       runtime_version:
-        description: Immutable runtime release, for example 1.62.0-r1
+        description: Immutable runtime release, for example 1.63.0-r1
         required: true
-        default: '1.62.0-r1'
+        default: '1.63.0-r1'
         type: string
       playwright_version:
         description: Playwright version to build and publish
         required: true
-        default: '1.62.0'
+        default: '1.63.0'
         type: string
 
 concurrency:
@@ -54,8 +54,8 @@ jobs:
             runtime="${DISPATCH_RUNTIME#v}"
             version="${DISPATCH_VERSION#v}"
           else
-            runtime="1.62.0-r1"
-            version="1.62.0"
+            runtime="1.63.0-r1"
+            version="1.63.0"
           fi
           [[ "${runtime}" =~ ^[0-9]+\.[0-9]+\.[0-9]+-r[0-9]+$ ]]
           [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
