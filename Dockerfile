@@ -4,12 +4,13 @@
 # on 2026-09-09. The build command and release workflow select linux/amd64.
 FROM node:24-bookworm-slim@sha256:6642ef280aebc09c4541bee0b15c9f89f0f3f3c247ddee79ae1d37eddfdcbbaa AS runtime
 
-ARG PLAYWRIGHT_VERSION=1.63.0
-ARG RUNTIME_VERSION=1.63.0-r1
+ARG PLAYWRIGHT_VERSION=1.64.1
+ARG RUNTIME_VERSION=1.64.1-r1
 ARG SOURCE_COMMIT=local
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    PLAYWRIGHT_RUNTIME_CHROMIUM_VERSION=156.0.8078.80 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
@@ -20,6 +21,7 @@ RUN set -eux; \
         ca-certificates \
         python3.11 \
         python3.11-venv \
+        unzip \
         wget \
         xauth \
         xvfb; \
@@ -28,7 +30,25 @@ RUN set -eux; \
     cd "${temp_dir}"; \
     npm init --yes >/dev/null; \
     npm install --no-save --ignore-scripts --no-audit --fund=false "playwright@${PLAYWRIGHT_VERSION}"; \
-    PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH}" npx --no-install playwright install --with-deps chromium; \
+    test "${PLAYWRIGHT_VERSION}" = 1.64.1; \
+    npx --no-install playwright install-deps chromium; \
+    npx --no-install playwright install ffmpeg; \
+    rm -rf "${temp_dir}" /root/.npm /root/.cache; \
+    rm -rf /var/cache/apt/* /var/lib/apt/lists/*
+
+RUN set -eux; \
+    temp_dir="$(mktemp -d)"; \
+    cd "${temp_dir}"; \
+    wget -q "https://storage.googleapis.com/chrome-for-testing-public/${PLAYWRIGHT_RUNTIME_CHROMIUM_VERSION}/linux64/chrome-linux64.zip"; \
+    wget -q "https://storage.googleapis.com/chrome-for-testing-public/${PLAYWRIGHT_RUNTIME_CHROMIUM_VERSION}/linux64/chrome-headless-shell-linux64.zip"; \
+    echo 'b711c720f774be355197f32edf37e0651418ba036d92446ee2da19ac017540a7  chrome-linux64.zip' | sha256sum -c -; \
+    echo '547dcd374e02961bf998f6046a267644f8502225c36bb78ca307dab32a0b3eb4  chrome-headless-shell-linux64.zip' | sha256sum -c -; \
+    mkdir -p "${PLAYWRIGHT_BROWSERS_PATH}/chromium-1248" "${PLAYWRIGHT_BROWSERS_PATH}/chromium_headless_shell-1248"; \
+    unzip -q chrome-linux64.zip -d "${PLAYWRIGHT_BROWSERS_PATH}/chromium-1248"; \
+    unzip -q chrome-headless-shell-linux64.zip -d "${PLAYWRIGHT_BROWSERS_PATH}/chromium_headless_shell-1248"; \
+    test "$("${PLAYWRIGHT_BROWSERS_PATH}/chromium-1248/chrome-linux64/chrome" --version | awk '{print $NF}')" = "${PLAYWRIGHT_RUNTIME_CHROMIUM_VERSION}"; \
+    test "$("${PLAYWRIGHT_BROWSERS_PATH}/chromium_headless_shell-1248/chrome-headless-shell-linux64/chrome-headless-shell" --version | awk '{print $NF}')" = "${PLAYWRIGHT_RUNTIME_CHROMIUM_VERSION}"; \
+    touch "${PLAYWRIGHT_BROWSERS_PATH}/chromium-1248/INSTALLATION_COMPLETE" "${PLAYWRIGHT_BROWSERS_PATH}/chromium_headless_shell-1248/INSTALLATION_COMPLETE"; \
     find "${PLAYWRIGHT_BROWSERS_PATH}" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort > /tmp/playwright-browser-dirs; \
     test "$(grep -Ec '^chromium-[0-9]+$' /tmp/playwright-browser-dirs)" -eq 1; \
     test "$(grep -Ec '^chromium_headless_shell-[0-9]+$' /tmp/playwright-browser-dirs)" -eq 1; \
@@ -56,7 +76,9 @@ LABEL org.opencontainers.image.title="Playwright Chromium Runtime" \
       org.opencontainers.image.revision="${SOURCE_COMMIT}" \
       com.j2h4u.runtime.name="playwright-chromium-runtime" \
       com.j2h4u.runtime.version="${RUNTIME_VERSION}" \
-      com.j2h4u.playwright.version="${PLAYWRIGHT_VERSION}"
+      com.j2h4u.playwright.version="${PLAYWRIGHT_VERSION}" \
+      com.j2h4u.chromium.version="${PLAYWRIGHT_RUNTIME_CHROMIUM_VERSION}" \
+      com.j2h4u.chromium.source="https://googlechromelabs.github.io/chrome-for-testing/"
 
 # The smoke stage is intentionally excluded from the default image. It adds
 # client bindings only to validate this runtime during a disposable build.
