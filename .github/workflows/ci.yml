@@ -7,160 +7,190 @@ on:
     branches: [main]
     tags: ['v*.*.*-r*']
   workflow_dispatch:
-    inputs:
-      runtime_version:
-        description: Immutable runtime release, for example 1.64.1-r1
-        required: true
-        default: '1.64.1-r1'
-        type: string
-      playwright_version:
-        description: Playwright version to build and publish
-        required: true
-        default: '1.64.1'
-        type: string
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: runtime-release
+  cancel-in-progress: false
 
 env:
   IMAGE_NAME: ghcr.io/j2h4u/playwright-chromium-runtime
 
 jobs:
-  build-and-smoke:
+  build-and-publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 50
     permissions:
-      contents: read
-    outputs:
-      playwright_version: ${{ steps.version.outputs.value }}
-      runtime_version: ${{ steps.version.outputs.runtime }}
+      contents: write
+      packages: write
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
-      - name: Resolve and validate Playwright version
+      - name: Test refresh logic
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Refresh Stable browser pins
+        if: github.event_name == 'workflow_dispatch'
+        run: python3 scripts/stable_refresh.py refresh
+
+      - name: Commit updated pins locally
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          set -uo pipefail
+          if ! git diff --quiet -- Dockerfile; then
+            git config user.name 'github-actions[bot]' || exit 1
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com' || exit 1
+            git add Dockerfile || exit 1
+            git commit -m 'fix: refresh Chrome for Testing stable' || exit 1
+          fi
+
+      - name: Resolve pinned versions and source commit
         id: version
         shell: bash
-        env:
-          DISPATCH_RUNTIME: ${{ inputs.runtime_version }}
-          DISPATCH_VERSION: ${{ inputs.playwright_version }}
         run: |
-          set -euo pipefail
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            runtime="${GITHUB_REF_NAME#v}"
-            version="${runtime%-r*}"
-          elif [[ -n "${DISPATCH_RUNTIME}" ]]; then
-            runtime="${DISPATCH_RUNTIME#v}"
-            version="${DISPATCH_VERSION#v}"
-          else
-            runtime="1.64.1-r1"
-            version="1.64.1"
+          set -uo pipefail
+          python3 scripts/stable_refresh.py pins >> "$GITHUB_OUTPUT" || exit 1
+          commit=$(git rev-parse HEAD) || exit 1
+          printf 'commit=%s\n' "$commit" >> "$GITHUB_OUTPUT" || exit 1
+
+      - name: Validate release and immutable tag
+        id: release
+        shell: bash
+        env:
+          RUNTIME: ${{ steps.version.outputs.runtime }}
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -uo pipefail
+          if [[ "$EVENT" == pull_request || ( "$EVENT" == push && "$REF" == refs/heads/main ) ]]; then
+            printf 'publish=false\nbuild=true\n' >> "$GITHUB_OUTPUT" || exit 1
+            exit 0
           fi
-          [[ "${runtime}" =~ ^[0-9]+\.[0-9]+\.[0-9]+-r[0-9]+$ ]]
-          [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          [[ "${runtime}" == "${version}-r"* ]]
-          echo "value=${version}" >> "${GITHUB_OUTPUT}"
-          echo "runtime=${runtime}" >> "${GITHUB_OUTPUT}"
+          if [[ "$EVENT" == workflow_dispatch && "$REF" != refs/heads/main ]]; then
+            printf 'Dispatch must use main\n' >&2
+            exit 1
+          fi
+          if [[ "$REF" == refs/tags/* && "$REF_NAME" != "v$RUNTIME" ]]; then
+            printf 'Tag does not match Dockerfile runtime pin\n' >&2
+            exit 1
+          fi
+          if [[ "$REF" == refs/tags/* ]]; then
+            main_commit=$(git rev-parse origin/main) || exit 1
+            current_commit=$(git rev-parse HEAD) || exit 1
+            if [[ "$main_commit" != "$current_commit" ]]; then
+              printf 'Release tag must point to current main\n' >&2
+              exit 1
+            fi
+          fi
+          status=0
+          python3 scripts/registry_tag.py "v$RUNTIME" || status=$?
+          if (( status == 0 )); then
+            if [[ "$EVENT" == workflow_dispatch ]] && git diff --quiet origin/main HEAD -- Dockerfile; then
+              printf 'publish=channels\nbuild=true\n' >> "$GITHUB_OUTPUT" || exit 1
+              exit 0
+            fi
+            printf 'Immutable release tag already exists\n' >&2
+            exit 1
+          fi
+          if (( status != 3 )); then exit "$status"; fi
+          printf 'publish=full\nbuild=true\n' >> "$GITHUB_OUTPUT" || exit 1
 
       - name: Set up Buildx
+        if: steps.release.outputs.build == 'true'
         uses: docker/setup-buildx-action@v4
 
       - name: Build amd64 runtime image
+        if: steps.release.outputs.build == 'true' && steps.release.outputs.publish != 'channels'
         uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
           platforms: linux/amd64
           build-args: |
-            PLAYWRIGHT_VERSION=${{ steps.version.outputs.value }}
+            PLAYWRIGHT_VERSION=${{ steps.version.outputs.playwright }}
             RUNTIME_VERSION=${{ steps.version.outputs.runtime }}
-            SOURCE_COMMIT=${{ github.sha }}
+            SOURCE_COMMIT=${{ steps.version.outputs.commit }}
           tags: playwright-chromium-runtime:ci
           load: true
           cache-from: type=gha,scope=playwright-chromium-runtime
           cache-to: type=gha,mode=max,scope=playwright-chromium-runtime
 
-      - name: Install temporary Node binding and run headless smoke
+      - name: Restore existing release for channel retry
+        if: steps.release.outputs.publish == 'channels'
+        env:
+          RUNTIME: ${{ steps.version.outputs.runtime }}
+          SOURCE_COMMIT: ${{ steps.version.outputs.commit }}
         shell: bash
         run: |
-          set -euo pipefail
-          docker run --rm --user 65532:65532 \
-            --env HOME=/tmp/runtime-home \
-            --env PLAYWRIGHT_VERSION=${{ steps.version.outputs.value }} \
-            --env PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
-            --volume "${GITHUB_WORKSPACE}/smoke:/opt/runtime-smoke:ro" \
-            playwright-chromium-runtime:ci \
-            sh -euxc '
-              mkdir -p "$HOME"
-              node_dir=$(mktemp -d)
-              cd "$node_dir"
-              npm init --yes >/dev/null
-              npm install --no-save --ignore-scripts --no-audit --fund=false "playwright@${PLAYWRIGHT_VERSION}"
-              NODE_PATH="$node_dir/node_modules" node /opt/runtime-smoke/node-smoke.cjs
-            '
+          set -uo pipefail
+          docker pull "$IMAGE_NAME:v$RUNTIME" || exit 1
+          revision=$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$IMAGE_NAME:v$RUNTIME") || exit 1
+          if [[ "$revision" != "$SOURCE_COMMIT" ]]; then
+            printf 'Existing release does not match current source commit\n' >&2
+            exit 1
+          fi
+          docker tag "$IMAGE_NAME:v$RUNTIME" playwright-chromium-runtime:ci || exit 1
 
-      - name: Install temporary Python binding and run headed smoke in Xvfb
-        shell: bash
+      - name: Run Node headless smoke as non-root
+        if: steps.release.outputs.build == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.playwright }}
         run: |
-          set -euo pipefail
           docker run --rm --user 65532:65532 \
-            --env HOME=/tmp/runtime-home \
-            --env PLAYWRIGHT_VERSION=${{ steps.version.outputs.value }} \
+            --env HOME=/tmp/runtime-home --env PLAYWRIGHT_VERSION="$VERSION" \
             --env PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
-            --volume "${GITHUB_WORKSPACE}/smoke:/opt/runtime-smoke:ro" \
+            --volume "$GITHUB_WORKSPACE/smoke:/opt/runtime-smoke:ro" \
             playwright-chromium-runtime:ci \
-            sh -euxc '
-              mkdir -p "$HOME"
-              python_dir=$(mktemp -d)
-              python3 -m venv "$python_dir"
-              "$python_dir/bin/pip" install --no-cache-dir "playwright==${PLAYWRIGHT_VERSION}"
-              xvfb-run -a -s "-screen 0 1280x720x24" "$python_dir/bin/python" /opt/runtime-smoke/python-smoke.py
-            '
+            sh -euxc 'mkdir -p "$HOME"; node_dir=$(mktemp -d); cd "$node_dir"; npm init --yes >/dev/null; npm install --no-save --ignore-scripts --no-audit --fund=false "playwright@${PLAYWRIGHT_VERSION}"; NODE_PATH="$node_dir/node_modules" node /opt/runtime-smoke/node-smoke.cjs'
 
-  publish:
-    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || github.event_name == 'workflow_dispatch'
-    needs: build-and-smoke
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
+      - name: Run Python headed smoke as non-root
+        if: steps.release.outputs.build == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.playwright }}
+        run: |
+          docker run --rm --user 65532:65532 \
+            --env HOME=/tmp/runtime-home --env PLAYWRIGHT_VERSION="$VERSION" \
+            --env PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+            --volume "$GITHUB_WORKSPACE/smoke:/opt/runtime-smoke:ro" \
+            playwright-chromium-runtime:ci \
+            sh -euxc 'mkdir -p "$HOME"; python_dir=$(mktemp -d); python3 -m venv "$python_dir"; "$python_dir/bin/pip" install --no-cache-dir "playwright==${PLAYWRIGHT_VERSION}"; xvfb-run -a -s "-screen 0 1280x720x24" "$python_dir/bin/python" /opt/runtime-smoke/python-smoke.py'
 
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@v4
+      - name: Push tested refresh commit
+        if: github.event_name == 'workflow_dispatch' && steps.release.outputs.publish == 'full'
+        run: git push origin HEAD:main
 
       - name: Log in to GHCR
+        if: steps.release.outputs.publish == 'full' || steps.release.outputs.publish == 'channels'
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Docker image metadata
-        id: metadata
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=v${{ needs.build-and-smoke.outputs.runtime_version }}
-            type=raw,value=latest
-
-      - name: Build and publish amd64 image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: Dockerfile
-          platforms: linux/amd64
-          build-args: |
-            PLAYWRIGHT_VERSION=${{ needs.build-and-smoke.outputs.playwright_version }}
-            RUNTIME_VERSION=${{ needs.build-and-smoke.outputs.runtime_version }}
-            SOURCE_COMMIT=${{ github.sha }}
-          push: true
-          tags: ${{ steps.metadata.outputs.tags }}
-          labels: ${{ steps.metadata.outputs.labels }}
-          cache-from: type=gha,scope=playwright-chromium-runtime
-          cache-to: type=gha,mode=max,scope=playwright-chromium-runtime
+      - name: Publish the tested image
+        if: steps.release.outputs.publish == 'full' || steps.release.outputs.publish == 'channels'
+        shell: bash
+        env:
+          RUNTIME: ${{ steps.version.outputs.runtime }}
+          PLAYWRIGHT: ${{ steps.version.outputs.playwright }}
+          PUBLISH: ${{ steps.release.outputs.publish }}
+        run: |
+          set -uo pipefail
+          if [[ "$PUBLISH" == full ]]; then
+            status=0
+            python3 scripts/registry_tag.py "v$RUNTIME" || status=$?
+            if (( status != 3 )); then
+              printf 'Release tag exists or registry check failed\n' >&2
+              exit 1
+            fi
+            docker tag playwright-chromium-runtime:ci "$IMAGE_NAME:v$RUNTIME" || exit 1
+            docker push "$IMAGE_NAME:v$RUNTIME" || exit 1
+          fi
+          docker tag playwright-chromium-runtime:ci "$IMAGE_NAME:pw-$PLAYWRIGHT" || exit 1
+          docker push "$IMAGE_NAME:pw-$PLAYWRIGHT" || exit 1
+          docker tag playwright-chromium-runtime:ci "$IMAGE_NAME:latest" || exit 1
+          docker push "$IMAGE_NAME:latest" || exit 1

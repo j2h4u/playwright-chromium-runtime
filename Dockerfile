@@ -5,12 +5,12 @@
 FROM node:24-bookworm-slim@sha256:6642ef280aebc09c4541bee0b15c9f89f0f3f3c247ddee79ae1d37eddfdcbbaa AS runtime
 
 ARG PLAYWRIGHT_VERSION=1.64.1
-ARG RUNTIME_VERSION=1.64.1-r1
+ARG RUNTIME_VERSION=1.64.1-r2
 ARG SOURCE_COMMIT=local
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
-    PLAYWRIGHT_RUNTIME_CHROMIUM_VERSION=156.0.8078.80 \
+    PLAYWRIGHT_RUNTIME_CHROMIUM_VERSION=157.0.8103.38 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
@@ -41,8 +41,8 @@ RUN set -eux; \
     cd "${temp_dir}"; \
     wget -q "https://storage.googleapis.com/chrome-for-testing-public/${PLAYWRIGHT_RUNTIME_CHROMIUM_VERSION}/linux64/chrome-linux64.zip"; \
     wget -q "https://storage.googleapis.com/chrome-for-testing-public/${PLAYWRIGHT_RUNTIME_CHROMIUM_VERSION}/linux64/chrome-headless-shell-linux64.zip"; \
-    echo 'b711c720f774be355197f32edf37e0651418ba036d92446ee2da19ac017540a7  chrome-linux64.zip' | sha256sum -c -; \
-    echo '547dcd374e02961bf998f6046a267644f8502225c36bb78ca307dab32a0b3eb4  chrome-headless-shell-linux64.zip' | sha256sum -c -; \
+    echo '8cdeb344e9b2cefe59f4aea8d1d93d5d93054c03cde217665c16fc1f62e72a66  chrome-linux64.zip' | sha256sum -c -; \
+    echo 'deafffa74660b34853a4119c361fd427ac8c9fcb62db51ddb8a797cd83a4ba2d  chrome-headless-shell-linux64.zip' | sha256sum -c -; \
     mkdir -p "${PLAYWRIGHT_BROWSERS_PATH}/chromium-1248" "${PLAYWRIGHT_BROWSERS_PATH}/chromium_headless_shell-1248"; \
     unzip -q chrome-linux64.zip -d "${PLAYWRIGHT_BROWSERS_PATH}/chromium-1248"; \
     unzip -q chrome-headless-shell-linux64.zip -d "${PLAYWRIGHT_BROWSERS_PATH}/chromium_headless_shell-1248"; \
