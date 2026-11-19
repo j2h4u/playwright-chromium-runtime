@@ -1,7 +1,7 @@
 const { chromium } = require("playwright");
 
 (async () => {
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
   try {
     if (browser.version() !== process.env.PLAYWRIGHT_RUNTIME_CHROMIUM_VERSION) {
       throw new Error(`Unexpected Chromium version: ${browser.version()}`);

@@ -4,13 +4,13 @@
 # on 2026-09-09. The build command and release workflow select linux/amd64.
 FROM node:24-bookworm-slim@sha256:6642ef280aebc09c4541bee0b15c9f89f0f3f3c247ddee79ae1d37eddfdcbbaa AS runtime
 
-ARG PLAYWRIGHT_VERSION=1.64.1
-ARG RUNTIME_VERSION=1.64.1-r2
+ARG PLAYWRIGHT_VERSION=1.65.1
+ARG RUNTIME_VERSION=1.65.1-r1
 ARG SOURCE_COMMIT=local
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
-    PLAYWRIGHT_RUNTIME_CHROMIUM_VERSION=157.0.8103.38 \
+    PLAYWRIGHT_RUNTIME_CHROMIUM_VERSION=159.0.8154.6 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
@@ -19,6 +19,7 @@ RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
         ca-certificates \
+        libatomic1 \
         python3.11 \
         python3.11-venv \
         unzip \
@@ -30,7 +31,7 @@ RUN set -eux; \
     cd "${temp_dir}"; \
     npm init --yes >/dev/null; \
     npm install --no-save --ignore-scripts --no-audit --fund=false "playwright@${PLAYWRIGHT_VERSION}"; \
-    test "${PLAYWRIGHT_VERSION}" = 1.64.1; \
+    test "${PLAYWRIGHT_VERSION}" = 1.65.1; \
     npx --no-install playwright install-deps chromium; \
     npx --no-install playwright install ffmpeg; \
     rm -rf "${temp_dir}" /root/.npm /root/.cache; \
@@ -41,14 +42,16 @@ RUN set -eux; \
     cd "${temp_dir}"; \
     wget -q "https://storage.googleapis.com/chrome-for-testing-public/${PLAYWRIGHT_RUNTIME_CHROMIUM_VERSION}/linux64/chrome-linux64.zip"; \
     wget -q "https://storage.googleapis.com/chrome-for-testing-public/${PLAYWRIGHT_RUNTIME_CHROMIUM_VERSION}/linux64/chrome-headless-shell-linux64.zip"; \
-    echo '8cdeb344e9b2cefe59f4aea8d1d93d5d93054c03cde217665c16fc1f62e72a66  chrome-linux64.zip' | sha256sum -c -; \
-    echo 'deafffa74660b34853a4119c361fd427ac8c9fcb62db51ddb8a797cd83a4ba2d  chrome-headless-shell-linux64.zip' | sha256sum -c -; \
-    mkdir -p "${PLAYWRIGHT_BROWSERS_PATH}/chromium-1248" "${PLAYWRIGHT_BROWSERS_PATH}/chromium_headless_shell-1248"; \
-    unzip -q chrome-linux64.zip -d "${PLAYWRIGHT_BROWSERS_PATH}/chromium-1248"; \
-    unzip -q chrome-headless-shell-linux64.zip -d "${PLAYWRIGHT_BROWSERS_PATH}/chromium_headless_shell-1248"; \
-    test "$("${PLAYWRIGHT_BROWSERS_PATH}/chromium-1248/chrome-linux64/chrome" --version | awk '{print $NF}')" = "${PLAYWRIGHT_RUNTIME_CHROMIUM_VERSION}"; \
-    test "$("${PLAYWRIGHT_BROWSERS_PATH}/chromium_headless_shell-1248/chrome-headless-shell-linux64/chrome-headless-shell" --version | awk '{print $NF}')" = "${PLAYWRIGHT_RUNTIME_CHROMIUM_VERSION}"; \
-    touch "${PLAYWRIGHT_BROWSERS_PATH}/chromium-1248/INSTALLATION_COMPLETE" "${PLAYWRIGHT_BROWSERS_PATH}/chromium_headless_shell-1248/INSTALLATION_COMPLETE"; \
+    echo '370601106c1b5619aae5f06f7a3fdc60836486135934779461e2a208d777f596  chrome-linux64.zip' | sha256sum -c -; \
+    echo '77a6442fd3c8acd3bef9e1067fc26f5ef464277d22f0e8cb58dc3e4077a3e458  chrome-headless-shell-linux64.zip' | sha256sum -c -; \
+    mkdir -p "${PLAYWRIGHT_BROWSERS_PATH}/chromium-1255" "${PLAYWRIGHT_BROWSERS_PATH}/chromium_headless_shell-1255"; \
+    unzip -q chrome-linux64.zip -d "${PLAYWRIGHT_BROWSERS_PATH}/chromium-1255"; \
+    unzip -q chrome-headless-shell-linux64.zip -d "${PLAYWRIGHT_BROWSERS_PATH}/chromium_headless_shell-1255"; \
+    test "$("${PLAYWRIGHT_BROWSERS_PATH}/chromium-1255/chrome-linux64/chrome" --version | awk '{print $NF}')" = "${PLAYWRIGHT_RUNTIME_CHROMIUM_VERSION}"; \
+    test "$("${PLAYWRIGHT_BROWSERS_PATH}/chromium_headless_shell-1255/chrome-headless-shell-linux64/chrome-headless-shell" --version | awk '{print $NF}')" = "${PLAYWRIGHT_RUNTIME_CHROMIUM_VERSION}"; \
+    touch "${PLAYWRIGHT_BROWSERS_PATH}/chromium-1255/INSTALLATION_COMPLETE" "${PLAYWRIGHT_BROWSERS_PATH}/chromium_headless_shell-1255/INSTALLATION_COMPLETE"; \
+    ln -s "${PLAYWRIGHT_BROWSERS_PATH}/chromium-1255" "${PLAYWRIGHT_BROWSERS_PATH}/chromium-1254"; \
+    ln -s "${PLAYWRIGHT_BROWSERS_PATH}/chromium_headless_shell-1255" "${PLAYWRIGHT_BROWSERS_PATH}/chromium_headless_shell-1254"; \
     find "${PLAYWRIGHT_BROWSERS_PATH}" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort > /tmp/playwright-browser-dirs; \
     test "$(grep -Ec '^chromium-[0-9]+$' /tmp/playwright-browser-dirs)" -eq 1; \
     test "$(grep -Ec '^chromium_headless_shell-[0-9]+$' /tmp/playwright-browser-dirs)" -eq 1; \
@@ -96,6 +99,6 @@ RUN set -eux; \
     NODE_PATH="${node_dir}/node_modules" PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH}" node /opt/playwright-runtime-smoke/node-smoke.cjs; \
     python_dir="$(mktemp -d)"; \
     python3 -m venv "${python_dir}"; \
-    "${python_dir}/bin/pip" install --no-cache-dir "playwright==${PLAYWRIGHT_VERSION}"; \
+    "${python_dir}/bin/pip" install --no-cache-dir "playwright==1.65.2"; \
     PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH}" xvfb-run -a -s '-screen 0 1280x720x24' "${python_dir}/bin/python" /opt/playwright-runtime-smoke/python-smoke.py; \
     rm -rf "${node_dir}" "${python_dir}" /opt/playwright-runtime-smoke /root/.npm /root/.cache

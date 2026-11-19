@@ -44,22 +44,22 @@ class RefreshTests(unittest.TestCase):
     def test_update_increments_revision_and_replaces_both_hashes(self):
         _, old, _ = refresh.pins(self.dockerfile)
         hashes = dict(zip(refresh.ARCHIVES, ("a" * 64, "b" * 64)))
-        result = refresh.update(self.dockerfile, "158.0.8200.1", hashes)
+        result = refresh.update(self.dockerfile, "160.0.8200.1", hashes)
         self.assertEqual(refresh.pins(result)[1], old.rsplit("-r", 1)[0] + "-r" + str(int(old.rsplit("-r", 1)[1]) + 1))
-        self.assertEqual(refresh.pins(result)[2], "158.0.8200.1")
+        self.assertEqual(refresh.pins(result)[2], "160.0.8200.1")
         self.assertIn("a" * 64, result)
         self.assertIn("b" * 64, result)
         with self.assertRaises(ValueError):
-            refresh.update(result, "157.0.8103.38", hashes)
+            refresh.update(result, "159.0.8154.6", hashes)
 
     def test_rejects_bad_hash_or_pins(self):
         for hashes in ({}, dict.fromkeys(refresh.ARCHIVES, "not-a-hash")):
             with self.assertRaises(ValueError):
-                refresh.update(self.dockerfile, "158.0.8200.1", hashes)
+                refresh.update(self.dockerfile, "160.0.8200.1", hashes)
         with self.assertRaises(ValueError):
-            refresh.pins(self.dockerfile.replace("ARG RUNTIME_VERSION=1.64.1-r2", "ARG RUNTIME_VERSION=1.64.0-r2"))
+            refresh.pins(self.dockerfile.replace("ARG RUNTIME_VERSION=1.65.1-r1", "ARG RUNTIME_VERSION=1.65.0-r1"))
         with self.assertRaises(ValueError):
-            refresh.pins(self.dockerfile.replace("8cdeb344", "INVALID!"))
+            refresh.pins(self.dockerfile.replace("37060110", "INVALID!"))
 
     def test_unchanged_stable_does_not_download_or_write(self):
         class Response(io.BytesIO):

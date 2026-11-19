@@ -6,7 +6,7 @@ from playwright.async_api import async_playwright
 
 async def main() -> None:
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(headless=False)
+        browser = await playwright.chromium.launch(headless=False, args=["--no-sandbox"])
         try:
             assert browser.version == os.environ["PLAYWRIGHT_RUNTIME_CHROMIUM_VERSION"]
             page = await browser.new_page()
