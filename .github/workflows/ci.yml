@@ -111,7 +111,8 @@ jobs:
           file: Dockerfile
           platforms: linux/amd64
           build-args: |
-            PLAYWRIGHT_VERSION=${{ steps.version.outputs.playwright }}
+            PLAYWRIGHT_NODE_VERSION=${{ steps.version.outputs.node }}
+            PLAYWRIGHT_PYTHON_VERSION=${{ steps.version.outputs.python }}
             RUNTIME_VERSION=${{ steps.version.outputs.runtime }}
             SOURCE_COMMIT=${{ steps.version.outputs.commit }}
           tags: playwright-chromium-runtime:ci
@@ -138,26 +139,26 @@ jobs:
       - name: Run Node headless smoke as non-root
         if: steps.release.outputs.build == 'true'
         env:
-          VERSION: ${{ steps.version.outputs.playwright }}
+          VERSION: ${{ steps.version.outputs.node }}
         run: |
           docker run --rm --user 65532:65532 \
             --env HOME=/tmp/runtime-home --env PLAYWRIGHT_VERSION="$VERSION" \
             --env PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
             --volume "$GITHUB_WORKSPACE/smoke:/opt/runtime-smoke:ro" \
             playwright-chromium-runtime:ci \
-            sh -euxc 'mkdir -p "$HOME"; node_dir=$(mktemp -d); cd "$node_dir"; npm init --yes >/dev/null; npm install --no-save --ignore-scripts --no-audit --fund=false "playwright@${PLAYWRIGHT_VERSION}"; NODE_PATH="$node_dir/node_modules" node /opt/runtime-smoke/node-smoke.cjs'
+            sh -euxc 'test "$PLAYWRIGHT_VERSION" = "$PLAYWRIGHT_RUNTIME_PLAYWRIGHT_NODE_VERSION"; mkdir -p "$HOME"; node_dir=$(mktemp -d); cd "$node_dir"; npm init --yes >/dev/null; npm install --no-save --ignore-scripts --no-audit --fund=false "playwright@${PLAYWRIGHT_VERSION}"; NODE_PATH="$node_dir/node_modules" node /opt/runtime-smoke/node-smoke.cjs'
 
       - name: Run Python headed smoke as non-root
         if: steps.release.outputs.build == 'true'
         env:
-          VERSION: ${{ steps.version.outputs.playwright }}
+          VERSION: ${{ steps.version.outputs.python }}
         run: |
           docker run --rm --user 65532:65532 \
             --env HOME=/tmp/runtime-home --env PLAYWRIGHT_VERSION="$VERSION" \
             --env PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
             --volume "$GITHUB_WORKSPACE/smoke:/opt/runtime-smoke:ro" \
             playwright-chromium-runtime:ci \
-            sh -euxc 'mkdir -p "$HOME"; python_dir=$(mktemp -d); python3 -m venv "$python_dir"; "$python_dir/bin/pip" install --no-cache-dir "playwright==${PLAYWRIGHT_VERSION}"; xvfb-run -a -s "-screen 0 1280x720x24" "$python_dir/bin/python" /opt/runtime-smoke/python-smoke.py'
+            sh -euxc 'test "$PLAYWRIGHT_VERSION" = "$PLAYWRIGHT_RUNTIME_PLAYWRIGHT_PYTHON_VERSION"; test "$PLAYWRIGHT_VERSION" = "$PLAYWRIGHT_RUNTIME_PLAYWRIGHT_VERSION"; mkdir -p "$HOME"; python_dir=$(mktemp -d); python3 -m venv "$python_dir"; "$python_dir/bin/pip" install --no-cache-dir "playwright==${PLAYWRIGHT_VERSION}"; xvfb-run -a -s "-screen 0 1280x720x24" "$python_dir/bin/python" /opt/runtime-smoke/python-smoke.py'
 
       - name: Push tested refresh commit
         if: github.event_name == 'workflow_dispatch' && steps.release.outputs.publish == 'full'
@@ -176,7 +177,7 @@ jobs:
         shell: bash
         env:
           RUNTIME: ${{ steps.version.outputs.runtime }}
-          PLAYWRIGHT: ${{ steps.version.outputs.playwright }}
+          PLAYWRIGHT: ${{ steps.version.outputs.python }}
           PUBLISH: ${{ steps.release.outputs.publish }}
         run: |
           set -uo pipefail

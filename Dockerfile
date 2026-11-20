@@ -1,11 +1,12 @@
 # syntax=docker/dockerfile:1.7
 
 # The digest is the linux/amd64 manifest for node:24-bookworm-slim, inspected
-# on 2026-09-09. The build command and release workflow select linux/amd64.
-FROM node:24-bookworm-slim@sha256:6642ef280aebc09c4541bee0b15c9f89f0f3f3c247ddee79ae1d37eddfdcbbaa AS runtime
+# on 2026-11-20. The build command and release workflow select linux/amd64.
+FROM node:24-bookworm-slim@sha256:0e2646ab57e77b7a384a0cb59b6815b182c77e1f9c3ba36bd8435bd9c4e6680e AS runtime
 
-ARG PLAYWRIGHT_VERSION=1.65.1
-ARG RUNTIME_VERSION=1.65.1-r1
+ARG PLAYWRIGHT_NODE_VERSION=1.65.1
+ARG PLAYWRIGHT_PYTHON_VERSION=1.65.2
+ARG RUNTIME_VERSION=1.65.2-r1
 ARG SOURCE_COMMIT=local
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -30,8 +31,9 @@ RUN set -eux; \
     temp_dir="$(mktemp -d)"; \
     cd "${temp_dir}"; \
     npm init --yes >/dev/null; \
-    npm install --no-save --ignore-scripts --no-audit --fund=false "playwright@${PLAYWRIGHT_VERSION}"; \
-    test "${PLAYWRIGHT_VERSION}" = 1.65.1; \
+    npm install --no-save --ignore-scripts --no-audit --fund=false "playwright@${PLAYWRIGHT_NODE_VERSION}"; \
+    test "${PLAYWRIGHT_NODE_VERSION}" = 1.65.1; \
+    test "${PLAYWRIGHT_PYTHON_VERSION}" = 1.65.2; \
     npx --no-install playwright install-deps chromium; \
     npx --no-install playwright install ffmpeg; \
     rm -rf "${temp_dir}" /root/.npm /root/.cache; \
@@ -68,7 +70,9 @@ RUN set -eux; \
 # Release metadata stays below the expensive browser layer so a new source
 # commit or runtime revision does not invalidate the browser cache.
 ENV PLAYWRIGHT_RUNTIME_VERSION=${RUNTIME_VERSION} \
-    PLAYWRIGHT_RUNTIME_PLAYWRIGHT_VERSION=${PLAYWRIGHT_VERSION}
+    PLAYWRIGHT_RUNTIME_PLAYWRIGHT_VERSION=${PLAYWRIGHT_PYTHON_VERSION} \
+    PLAYWRIGHT_RUNTIME_PLAYWRIGHT_NODE_VERSION=${PLAYWRIGHT_NODE_VERSION} \
+    PLAYWRIGHT_RUNTIME_PLAYWRIGHT_PYTHON_VERSION=${PLAYWRIGHT_PYTHON_VERSION}
 
 LABEL org.opencontainers.image.title="Playwright Chromium Runtime" \
       org.opencontainers.image.description="Shared Node 24 and Python 3.11 runtime with Playwright Chromium browser artifacts" \
@@ -79,7 +83,9 @@ LABEL org.opencontainers.image.title="Playwright Chromium Runtime" \
       org.opencontainers.image.revision="${SOURCE_COMMIT}" \
       com.j2h4u.runtime.name="playwright-chromium-runtime" \
       com.j2h4u.runtime.version="${RUNTIME_VERSION}" \
-      com.j2h4u.playwright.version="${PLAYWRIGHT_VERSION}" \
+      com.j2h4u.playwright.version="${PLAYWRIGHT_PYTHON_VERSION}" \
+      com.j2h4u.playwright.node.version="${PLAYWRIGHT_NODE_VERSION}" \
+      com.j2h4u.playwright.python.version="${PLAYWRIGHT_PYTHON_VERSION}" \
       com.j2h4u.chromium.version="${PLAYWRIGHT_RUNTIME_CHROMIUM_VERSION}" \
       com.j2h4u.chromium.source="https://googlechromelabs.github.io/chrome-for-testing/"
 
@@ -87,7 +93,8 @@ LABEL org.opencontainers.image.title="Playwright Chromium Runtime" \
 # client bindings only to validate this runtime during a disposable build.
 FROM runtime AS smoke
 
-ARG PLAYWRIGHT_VERSION
+ARG PLAYWRIGHT_NODE_VERSION
+ARG PLAYWRIGHT_PYTHON_VERSION
 
 COPY smoke/ /opt/playwright-runtime-smoke/
 
@@ -95,10 +102,10 @@ RUN set -eux; \
     node_dir="$(mktemp -d)"; \
     cd "${node_dir}"; \
     npm init --yes >/dev/null; \
-    npm install --no-save --ignore-scripts --no-audit --fund=false "playwright@${PLAYWRIGHT_VERSION}"; \
+    npm install --no-save --ignore-scripts --no-audit --fund=false "playwright@${PLAYWRIGHT_NODE_VERSION}"; \
     NODE_PATH="${node_dir}/node_modules" PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH}" node /opt/playwright-runtime-smoke/node-smoke.cjs; \
     python_dir="$(mktemp -d)"; \
     python3 -m venv "${python_dir}"; \
-    "${python_dir}/bin/pip" install --no-cache-dir "playwright==1.65.2"; \
+    "${python_dir}/bin/pip" install --no-cache-dir "playwright==${PLAYWRIGHT_PYTHON_VERSION}"; \
     PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH}" xvfb-run -a -s '-screen 0 1280x720x24' "${python_dir}/bin/python" /opt/playwright-runtime-smoke/python-smoke.py; \
     rm -rf "${node_dir}" "${python_dir}" /opt/playwright-runtime-smoke /root/.npm /root/.cache

@@ -28,6 +28,11 @@ class RefreshTests(unittest.TestCase):
         self.assertEqual(version, "158.0.8200.1")
         self.assertEqual(set(urls), set(refresh.ARCHIVES))
 
+    def test_binding_pins_are_distinct_and_runtime_follows_python(self):
+        node, python, runtime, _ = refresh.pins(self.dockerfile)
+        changed = self.dockerfile.replace(f"ARG PLAYWRIGHT_NODE_VERSION={node}", "ARG PLAYWRIGHT_NODE_VERSION=9.8.7")
+        self.assertEqual(refresh.pins(changed)[:3], ("9.8.7", python, runtime))
+
     def test_wrong_host_artifact_and_malformed_manifest(self):
         for replacement in ("https://evil.example/archive.zip", "https://storage.googleapis.com/chrome-for-testing-public/158.0.8200.1/linux64/other.zip"):
             item = manifest()
@@ -42,11 +47,11 @@ class RefreshTests(unittest.TestCase):
             refresh.stable(item)
 
     def test_update_increments_revision_and_replaces_both_hashes(self):
-        _, old, _ = refresh.pins(self.dockerfile)
+        _, _, old, _ = refresh.pins(self.dockerfile)
         hashes = dict(zip(refresh.ARCHIVES, ("a" * 64, "b" * 64)))
         result = refresh.update(self.dockerfile, "160.0.8200.1", hashes)
-        self.assertEqual(refresh.pins(result)[1], old.rsplit("-r", 1)[0] + "-r" + str(int(old.rsplit("-r", 1)[1]) + 1))
-        self.assertEqual(refresh.pins(result)[2], "160.0.8200.1")
+        self.assertEqual(refresh.pins(result)[2], old.rsplit("-r", 1)[0] + "-r" + str(int(old.rsplit("-r", 1)[1]) + 1))
+        self.assertEqual(refresh.pins(result)[3], "160.0.8200.1")
         self.assertIn("a" * 64, result)
         self.assertIn("b" * 64, result)
         with self.assertRaises(ValueError):
@@ -57,7 +62,7 @@ class RefreshTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 refresh.update(self.dockerfile, "160.0.8200.1", hashes)
         with self.assertRaises(ValueError):
-            refresh.pins(self.dockerfile.replace("ARG RUNTIME_VERSION=1.65.1-r1", "ARG RUNTIME_VERSION=1.65.0-r1"))
+            refresh.pins(self.dockerfile.replace("ARG RUNTIME_VERSION=1.65.2-r1", "ARG RUNTIME_VERSION=1.65.0-r1"))
         with self.assertRaises(ValueError):
             refresh.pins(self.dockerfile.replace("37060110", "INVALID!"))
 
@@ -67,7 +72,7 @@ class RefreshTests(unittest.TestCase):
 
         class Opener:
             def open(self, url, timeout):
-                return Response(json.dumps(manifest(refresh.pins(self_text)[2])).encode())
+                return Response(json.dumps(manifest(refresh.pins(self_text)[3])).encode())
 
         self_text = self.dockerfile
         with patch.object(refresh, "build_opener", return_value=Opener()), patch.object(refresh, "digest") as digest, patch.object(Path, "write_text") as write, patch("sys.argv", ["stable_refresh.py", "refresh"]):
