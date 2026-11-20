@@ -20,15 +20,16 @@ def one(pattern: str, text: str) -> str:
     return matches[0]
 
 
-def pins(text: str) -> tuple[str, str, str]:
-    playwright = one(r"^ARG PLAYWRIGHT_VERSION=(\d+\.\d+\.\d+)$", text)
+def pins(text: str) -> tuple[str, str, str, str]:
+    node = one(r"^ARG PLAYWRIGHT_NODE_VERSION=(\d+\.\d+\.\d+)$", text)
+    python = one(r"^ARG PLAYWRIGHT_PYTHON_VERSION=(\d+\.\d+\.\d+)$", text)
     runtime = one(r"^ARG RUNTIME_VERSION=(\d+\.\d+\.\d+-r[1-9]\d*)$", text)
     browser = one(r"^    PLAYWRIGHT_RUNTIME_CHROMIUM_VERSION=(\d+\.\d+\.\d+\.\d+) \\", text)
-    if not runtime.startswith(playwright + "-r"):
+    if not runtime.startswith(python + "-r"):
         raise ValueError("runtime and Playwright pins disagree")
     for archive in ARCHIVES:
         one(r"^    echo '([0-9a-f]{64})  " + re.escape(archive) + r"' \| sha256sum -c -; \\", text)
-    return playwright, runtime, browser
+    return node, python, runtime, browser
 
 
 def stable(manifest: dict) -> tuple[str, dict[str, str]]:
@@ -68,7 +69,7 @@ def digest(url: str) -> str:
 
 
 def update(text: str, version: str, hashes: dict[str, str]) -> str:
-    _, runtime, current = pins(text)
+    _, _, runtime, current = pins(text)
     if tuple(map(int, version.split("."))) <= tuple(map(int, current.split("."))):
         raise ValueError("new browser must be newer than the current pin")
     if set(hashes) != set(ARCHIVES) or any(not re.fullmatch(r"[0-9a-f]{64}", h) for h in hashes.values()):
@@ -85,9 +86,9 @@ def update(text: str, version: str, hashes: dict[str, str]) -> str:
 
 def main() -> None:
     text = DOCKERFILE.read_text()
-    playwright, runtime, current = pins(text)
+    node, python, runtime, current = pins(text)
     if sys.argv[1:] == ["pins"]:
-        print(f"playwright={playwright}\nruntime={runtime}\nbrowser={current}")
+        print(f"node={node}\npython={python}\nruntime={runtime}\nbrowser={current}")
         return
     if sys.argv[1:] != ["refresh"]:
         raise SystemExit("usage: stable_refresh.py pins|refresh")
